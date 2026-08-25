@@ -15,6 +15,7 @@ account_id_counter = 1
 trasaction_id_counter = 1
 
 ACCOUNT_TYPES = {"current", "savings"}
+DEFAULT_CURRENCY = "NGN"
 
 #---------------------------------------------------------------------------
 #VALIDATIONS
@@ -80,7 +81,7 @@ def validate_signup_payload(data, partial=False):
 
     if not partial or "password" in data:
         password = data.get("password", "")
-        if not isinstance(password, str) or not any (char.isdigit() for char in password) or len(password) <6:
+        if not isinstance(loginPassword, str) or not any (char.isdigit() for char in password) or len(password) <6:
             errors.append("'password' is required and must be greater than 6.")
         else:
             cleaned["password"] = password.strip()
@@ -102,6 +103,13 @@ def validate_accountDetails_payload(data):
         errors.append(f"'account_type' must be one of: {', '.join(sorted(ACCOUNT_TYPES))}.")
     else:
         cleaned["account_type"] = account_type
+
+    currency = data.get("currency", "")
+    if currency != DEFAULT_CURRENCY:
+        errors.append(f"'currency' must be: {', '.join(sorted(DEFAULT_CURRENCY))}.")
+    else:
+        cleaned["currency"] = currency
+
 
 
 # ---------------------------------------------------------------------------
@@ -130,9 +138,9 @@ def retrieve_each_user(user_id):
     user = users.get(user_id)
     if not user:
         return jsonify({"error": f"User with id  {user_id} not found."}), 404
-    
+
 #create user
-@app.route("/user/create", methods=["POST"])
+@app.route("/user/signup", methods=["POST"])
 def create_user():
     global user_id_counter
     
@@ -160,6 +168,45 @@ def create_user():
     user_id_counter += 1
 
     return jsonify(new_user), 201
+
+#update user
+@app.route("/user/<int:user_id>", methods = ["PUT"])
+def update_user(user_id):
+    user = users.get(user_id)
+    if not user:
+        return jsonify({"error" : f"User with id {user_id} not found."}), 404
+
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"error": "Request body must be valid JSON."}), 400
+
+    errors, cleaned = validate_signup_payload(data, partial=True)
+    if errors:
+        return jsonify({"errors": errors}), 400
+
+    if not cleaned:
+        return jsonify({"error": "No valid fields provided to update."}), 400
+
+    user.update(cleaned)
+    return jsonify(user), 200
+
+#delete user
+@app.route("/user/<int:user_id>", methods=["DELETE"])
+def deactivate_user(user_id):
+    
+    user = users.get(user_id)
+    if not user:
+        return jsonify({"error": f"User with id {user_id} not found."}), 404
+    user["active"] = False
+    return "", 204
+
+
+
+#---------------------------------------------------------------------------
+# ACCOUNT ENDPOINTS  (create + read-heavy, hard delete for corrections)
+# --------------------------------------------------------------------------
+# @app.route("")
+
 
 
 
