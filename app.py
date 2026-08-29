@@ -28,6 +28,10 @@ def loginPassword(password):
 def verifyLoginPassword(saved_scrambled_string, user_input_attempt):
     return check_password_hash(saved_scrambled_string, user_input_attempt)
 
+def login_password(loginPassword, verifyLoginPassword):
+    password = loginPassword() == verifyLoginPassword()
+    return password
+
 #Transaction validation 
 SECRET_SERVER_SALT = "super-hidden-app-key-change-this"
 def transactionPin(pin, account_number):
@@ -74,14 +78,14 @@ def validate_signup_payload(data, partial=False):
 
     if not partial or "email" in data:
         email = data.get("email", "")
-        if not isinstance(email, str) or "@" not in email:
+        if not isinstance(email, str) or "@" and "." not in email:
             errors.append("'email' is required and must be a valid email address.")
         else:
             cleaned["email"] = email.strip().lower()
 
     if not partial or "password" in data:
         password = data.get("password", "")
-        if not isinstance(loginPassword, str) or not any (char.isdigit() for char in password) or len(password) <6:
+        if not isinstance(loginPassword(password), str) or not any (char.isdigit() for char in password) or len(password) <6:
             errors.append("'password' is required and must be greater than 6.")
         else:
             cleaned["password"] = password.strip()
@@ -160,7 +164,7 @@ def create_user():
         "user_name" : cleaned["user_name"],
         "email": cleaned["email"],
         "password" : cleaned["password"],
-        "account number" : account_number,
+        "active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "message" : "Signup successful",
     }
@@ -200,12 +204,149 @@ def deactivate_user(user_id):
     user["active"] = False
     return "", 204
 
+#login 
+@app.route("/user/login", methods=["POST"])
+def login_user():
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"errors": "Request body must be valid JSON."}), 400
+    errors = login_password(loginPassword, verifyLoginPassword)
+    if errors:
+        return jsonify({"errors": errors}), 400
+    
+    login_user = {
+        "Password" : login_password,
+        "message" : "login successful"
+    }
+    return jsonify(login_user), 200
+
 
 
 #---------------------------------------------------------------------------
 # ACCOUNT ENDPOINTS  (create + read-heavy, hard delete for corrections)
 # --------------------------------------------------------------------------
-# @app.route("")
+#get all account detail
+@app.route("/details")
+def get_details():
+    
+    user_id = request.args.get("user_id", type=int)
+    
+    result = list(account_details.values)
+    
+    if user_id is not None:
+        result = [s for s in result if s["user_id"] == user_id]
+        
+    return jsonify({"count": len(result), "details": result}), 200
+
+#get each user details
+@app.route("/details/<int:account_id>", methods=["GET"])
+def retrieve_single_detail(account_id):
+    detail = account_details.get(account_id)
+    if not detail:
+        return jsonify({"error": f"Account detail with id {account_id} not fount."}), 404
+    return jsonify(detail), 200
+
+#account detail
+@app.route("/account", methods=["POST"])
+def account_details():
+    global account_id_counter
+    
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"errors": "Request body must be valid JSON."}), 400
+    errors, cleaned = validate_accountDetails_payload(data)
+    if errors:
+        return jsonify({"errors": errors}), 400
+
+    #Block account details from deactivating user
+    customer = users[cleaned["user_id"]]
+    if not customer["active"]:
+        return jsonify({"error": "Cannot record an account deatail for an inactive user."}), 409
+
+    account_detail = {
+        "id": account_id_counter,
+        "user_id": cleaned["user_id"],
+        "account_type": cleaned["account_type"],
+        "currency": cleaned["currency"],
+        "account_number": account_number,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    account_detail[account_id_counter] = account_detail
+    account_id_counter += 1
+
+    return jsonify(account_detail)
+
+#delete detail
+@app.route("/account/<int:account_id>", methods=["DELETE"])
+def delete_sale(account_id):
+    
+    if account_id not in account_details:
+        return jsonify({"error": f"Sale with id {account_id} not found."}), 404
+
+    del account_details[account_id]
+    return "", 204
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ---------------------------------------------------------------------------
+# ERROR HANDLERS — consistent JSON errors instead of Flask's default HTML
+# ---------------------------------------------------------------------------
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Resource not found."}), 404
+
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({"error": "Method not allowed on this endpoint."}), 405
+
+
+@app.errorhandler(500)
+def server_error(e):
+    return jsonify({"error": "An internal server error occurred."}), 500
+
+
+
+
+
+
+
+
 
 
 
