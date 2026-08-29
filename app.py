@@ -29,8 +29,10 @@ def verifyLoginPassword(saved_scrambled_string, user_input_attempt):
     return check_password_hash(saved_scrambled_string, user_input_attempt)
 
 def login_password(loginPassword, verifyLoginPassword):
-    password = loginPassword() == verifyLoginPassword()
-    return password
+    if loginPassword() == verifyLoginPassword():
+        return True
+    else:
+        return False
 
 #Transaction validation 
 SECRET_SERVER_SALT = "super-hidden-app-key-change-this"
@@ -46,6 +48,12 @@ def verifyTransactionPin(saved_hashed_pin, pin_input_attempt, account_number):
     attempt_hash = hashlib.sha256(attempt_mixture.encode()).hexdigest()
     
     return attempt_hash == saved_hashed_pin
+
+def transaction_pin(transactionPin, verifyTransactionPin):
+    if transactionPin() == verifyTransactionPin():
+        return True
+    else:
+        return False
 
 #Account number validation
 def generateAccountNumber():
