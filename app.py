@@ -8,15 +8,16 @@ app = Flask(__name__)
 
 users = {}
 accounts = {}
+account_details = {}
 trasactions = {}
 
 user_id_counter = 1
 account_id_counter = 1
-trasaction_id_counter = 1
+transaction_id_counter = 1
 
 ACCOUNT_TYPES = {"current", "savings"}
-DEFAULT_CURRENCY = {"NGN"}
-TRANSACTION_TYPE = {"deposite", "withdrawl", "transfer"}
+DEFAULT_CURRENCY = "NGN"
+TRANSACTION_TYPE = {"deposit", "withdrawal", "transfer"}
 
 #---------------------------------------------------------------------------
 #VALIDATIONS
@@ -29,11 +30,6 @@ def loginPassword(password):
 def verifyLoginPassword(saved_scrambled_string, user_input_attempt):
     return check_password_hash(saved_scrambled_string, user_input_attempt)
 
-def login_password(loginPassword, verifyLoginPassword):
-    if loginPassword() == verifyLoginPassword():
-        return True
-    else:
-        return False
 
 #Transaction validation 
 SECRET_SERVER_SALT = "super-hidden-app-key-change-this"
@@ -50,11 +46,6 @@ def verifyTransactionPin(saved_hashed_pin, pin_input_attempt, account_number):
     
     return attempt_hash == saved_hashed_pin
 
-def transaction_pin(transactionPin, verifyTransactionPin):
-    if transactionPin() == verifyTransactionPin():
-        return True
-    else:
-        return False
 
 #Account number validation
 def generateAccountNumber():
@@ -121,16 +112,23 @@ def validate_accountDetails_payload(data):
 
     currency = data.get("currency", "")
     if currency != DEFAULT_CURRENCY:
-        errors.append(f"'currency' must be: {', '.join(sorted(DEFAULT_CURRENCY))}.")
+        errors.append(f"'currency' must be: {DEFAULT_CURRENCY}.")
     else:
         cleaned["currency"] = currency
         
     pin = data.get("pin", "")
-    if not isinstance(transactionPin(pin), int) or not len(pin) == 4:
+    if not isinstance(pin, str) or not len(pin) == 4:
         errors.append("'pin' is required and must be exactly four(4) digit.")
     else:
         cleaned["pin"] = pin.strip()
+
+    balance = data.get("balance", 0)
+    if not isinstance(balance, (int or float)) or balance < 0:
+        errors.append("'balance' is required and must be a number.")
+    else:
+        cleaned["balance"] = balance
         
+    return errors, cleaned
         
 def login_payload(data):
     errors = []
@@ -150,18 +148,37 @@ def login_payload(data):
     return errors, cleaned
 
 
+
 #TRANSACTION PAYLOAD
-def validate_transaction_payload(data, partial=False):
+def validate_transaction_payload(data):
     errors = []
     cleaned = {}
 
-    if not partial or "transaction_type" in data:
-        transaction_type = data.get("transaction_type", "")
-        if transaction_type not in TRANSACTION_TYPE:
-            errors.append(f"'transaction type' must be one of: {', '.join(sorted(TRANSACTION_TYPE))}.")
-        else:
-            cleaned["transaction_type"] = transaction_type
+    account_id = data.get("account_id")
+    if not isinstance(account_id, int) or account_id not in account_details:
+        errors.append("'account_id' is reqired and must reference and existing account.")
+    else:
+        cleaned["account_id"] = account_id
 
+    transaction_type = data.get("transaction_type", "")
+    if transaction_type not in TRANSACTION_TYPE:
+        errors.append(f"'transaction type' must be one of: {', '.join(sorted(TRANSACTION_TYPE))}.")
+    else:
+        cleaned["transaction_type"] = transaction_type
+
+    amount = data.get("amount", "")
+    if amount is None or amount <= 0:
+        errors.append("'amount' is reqired and must be greater than zero(0).")
+    else:
+        cleaned["amount"] = amount
+        
+    pin = data.get("pin", "")
+    if not isinstance(pin, str) or not pin.strip:
+        errors.append("'pin' is required and must not be a non-empty string.")
+    else:
+        cleaned["pin"] = pin.strip()
+
+    return errors, cleaned
 
 # ---------------------------------------------------------------------------
 # USER ENDPOINTS  (full CRUD)
@@ -212,7 +229,7 @@ def create_user():
         "user_name" : cleaned["user_name"],
         "email": cleaned["email"],
         "password" : loginPassword(cleaned["password"]),
-        "account_nuber" : account_number,
+        "account_number" : account_number,
         "active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "message" : "Signup successful",
@@ -264,7 +281,7 @@ def login_user():
     if errors:
         return jsonify({"errors": errors}), 400
         
-    for user in users:
+    for user in users.values():
         if verifyLoginPassword(user["password"], cleaned["password"]):
             login_user = {
                 "Password" : cleaned["password"],
@@ -286,7 +303,7 @@ def get_details():
     
     user_id = request.args.get("user_id", type=int)
     
-    result = list(account_details.values)
+    result = list(account_details.values())
     
     if user_id is not None:
         result = [s for s in result if s["user_id"] == user_id]
@@ -302,8 +319,8 @@ def retrieve_single_detail(account_id):
     return jsonify(detail), 200
 
 #account detail
-@app.route("/account", methods=["POST"])
-def account_details():
+@app.route("/details", methods=["POST"])
+def create_account_details():
     global account_id_counter
     
     data = request.get_json(silent=True)
@@ -315,24 +332,28 @@ def account_details():
 
     #Block account details from deactivating user
     customer = users[cleaned["user_id"]]
+
     if not customer["active"]:
         return jsonify({"error": "Cannot record an account deatail for an inactive user."}), 409
+    account_number = customer["account_number"]
 
     account_detail = {
         "id": account_id_counter,
         "user_id": cleaned["user_id"],
         "account_type": cleaned["account_type"],
         "currency": cleaned["currency"],
-        "account_number": account_number,
+        "transaction_pin": transactionPin(cleaned["pin"], account_number),
+        "account_number": customer["account_number"],
+        "balance": cleaned["balance"],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    account_detail[account_id_counter] = account_detail
+    account_details[account_id_counter] = account_detail
     account_id_counter += 1
 
-    return jsonify(account_detail)
+    return jsonify(account_detail), 201
 
 #delete detail
-@app.route("/account/<int:account_id>", methods=["DELETE"])
+@app.route("/details/<int:account_id>", methods=["DELETE"])
 def delete_sale(account_id):
     
     if account_id not in account_details:
@@ -344,68 +365,72 @@ def delete_sale(account_id):
 #---------------------------------------------------------------------------
 # TRANSACTION ENPOINTS 
 # --------------------------------------------------------------------------
-def transaction_type():
-    errors, cleaned = validate_transaction_payload()
+#deposit
+@app.route("/deposit", methods=["POST"])
+def deposit():
+    global transaction_id_counter
+    
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"errors": "Request body must be valid JSON."}), 400
+
+    errors, cleaned = validate_transaction_payload(data)
     if errors:
         return jsonify({"error": errors}), 400
-    global trasaction_id_counter
-    if cleaned["transaction_type"] == "deposite":
-        @app.route("/deposit", methods=["POST"])
-        def deposite():
-            data = request.get_json(silent=True)
-            if data is None:
-                return jsonify({"errors": "Request body must be valid JSON."}), 400
     
-            errors, cleaned = validate_transaction_payload(data)
-            if errors:
-                return jsonify({"error": errors}), 400
+    if cleaned["transaction_type"] != "deposite":
+        return jsonify({"error": "This endpoint only accepts deposit transactions."}), 400
 
-            account_number = request.form["account_number"]
-            amount = float(request.form['amount'])
-    
-            if account_number not in accounts:
-                return jsonify({"error": f"Account not found."}), 404
-            if amount <= 0:
-                return jsonify({"error": "Invalid amount. Amount must be grater than 0."})
+    account = account_details.get(cleaned["account_id"])
 
-            deposite = {
+    account_number = account["account_number"]
+
+    # for detail in account_details.values():
+    if not verifyTransactionPin(account["transaction_pin"], cleaned["pin"], account_number):
+        return jsonify({"error": "Incorrect pin"}), 401
+    deposit = {
+                "id": transaction_id_counter,
+                "account_id": cleaned["account_id"],
                 "transaction_type": cleaned["transaction_type"],
-                "account_number": cleaned["account_number"],
+                "account_number": account_number,
                 "amount": cleaned["amount"],
                 "pin": cleaned["pin"],
-                "message":"Deposite successful"
+                "message":"Deposite successful",
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            # accounts[account_number]['balance'] += {balance}
-            return jsonify(deposite), 200
+    account["balance"] += cleaned["amount"]
+    trasactions[transaction_id_counter] = deposit
+    transaction_id_counter += 1
+    return jsonify(deposit), 200
         
-    elif cleaned["transaction_type"] == "withdrawl":
-        @app.route("/withdrawl", methods=["POST"])
-        def withdrawl():
-            data = request.get_json(silent=True)
-            if data is None:
-                return jsonify({"errors": "Request body must be valid JSON."}), 400
+@app.route("/withdrawl", methods=["POST"])
+def withdrawl():
+    global transaction_id_counter
     
-            errors, cleaned = validate_transaction_payload(data)
-            if errors:
-                return jsonify({"error": errors}), 400
-            
-            account_number = request.form["account_number"]
-            amount = float(request.form['amount'])
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({"errors": "Request body must be valid JSON."}), 400
+
+    errors, cleaned = validate_transaction_payload(data)
+    if errors:
+        return jsonify({"error": errors}), 400
     
-            if account_number not in accounts:
-                return jsonify({"error": f"Account not found."}), 404
-            if amount <= 0:
-                return jsonify({"error": "Invalid amount. Amount must be grater than 0."})
-            
+    if account_number not in accounts:
+        return jsonify({"error": f"Account not found."}), 404
+    
+    for details in account_details:
+        if verifyTransactionPin(details["pin"], cleaned["pin"], account_number):
+
             withdrawl = {
+                "id": transaction_id_counter,
                 "transaction_type": cleaned["transaction_type"],
                 "account_number": cleaned["account_number"],
                 "amount": cleaned["amount"],
                 "pin": cleaned["pin"],
                 "message":"withdrawl successful"
             }
-            # accounts[account_number]['balance'] -= {balance}
-            return jsonify(withdrawl), 200
+    accounts[account_number]['balance'] -= cleaned["amount"]
+    return jsonify(withdrawl), 200
 
 
 
