@@ -556,30 +556,6 @@ def all_transactions():
     return jsonify(all_transactions), 200
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # ERROR HANDLERS — consistent JSON errors instead of Flask's default HTML
 # ---------------------------------------------------------------------------
@@ -597,25 +573,6 @@ def method_not_allowed(e):
 @app.errorhandler(500)
 def server_error(e):
     return jsonify({"error": "An internal server error occurred."}), 500
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
